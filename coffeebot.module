@@ -1,0 +1,119 @@
+<?php
+
+/*
+ * To change this license header, choose License Headers in Project Properties.
+ * To change this template file, choose Tools | Templates
+ * and open the template in the editor.
+ */
+
+define('COFFEEBOT_DEFAULT_CHANNEL', '#coffeebot');
+define('COFFEEBOT_DEFAULT_USERNAME', 'CoffeeBot');
+define('COFFEEBOT_DEFAULT_EMOJI', ':coffee:');
+define('COFFEEBOT_SLACK_URL', 'https://hooks.slack.com/services/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');
+define('CONTENT_JSON_URL', 'http://kirbybest.ca/drop/coffee.json');
+
+/**
+ * Implementation of hook_menu().
+ */
+function coffeebot_menu() {
+  $items = array();
+
+  $items['admin/config/services/coffeebot'] = array(
+    'title' => t('CoffeeBot settings'),
+    'description' => t('Global settings for the Slack API for CoffeeBot.'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('coffeebot_settings_form'),
+    'type' => MENU_NORMAL_ITEM,
+    'access arguments' => array('administer'),
+    'file' => 'coffeebot.admin.inc',
+  );
+
+  return $items;
+}
+
+/**
+ * Implements hook_cron().
+ */
+function coffeebot_cron() {
+  // Call Slack api.
+  _post_slack_webhook_api();
+}
+
+/**
+ * Helper funciton to call webhook api to post message on Slack.
+ */
+function _post_slack_webhook_api() {
+  $json_url = variable_get('content_json_url', CONTENT_JSON_URL);
+//  drupal_set_message($message);
+  $response = drupal_http_request($json_url);
+  $text_content = json_decode(htmlspecialchars_decode($response->data));
+//  print '<span>';  var_dump($text_content); exit();
+//  drupal_set_message(print_r($response));
+  foreach ($text_content as $number => $group) {
+    switch ($number) {
+      case 0:
+        $message = ':one: ';
+        break;
+      case 1:
+        $message = ':two: ';
+        break;
+      case 2:
+        $message = ':three: ';
+        break;
+    }
+
+    $store_message = '';
+    foreach ($group as $key => $column) {
+      if ($key == 'STORE') {
+        $store_message .= 'are going to ' . $column;
+        $store_message .= ' <http://maps.google.com/?q=' . str_replace(' ', '+', $column) . '|Google Maps link>';
+      }
+      else {
+        if (strlen(trim($column)) > 0) $message .= '<' . $column . '> ';
+      }
+    }
+    $message .= $store_message;
+
+//    drupal_set_message($message);
+
+  //Original curl command
+  //curl -X POST --data-urlencode 'payload={"channel": "#megha-team-admin", "username": "coffeebot", "text": "Hello from coffeebot. (Sorry about this. Testing :stuck_out_tongue_winking_eye:)", "icon_emoji": ":coffee:"}' https://hooks.slack.com/services/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
+  //Coffeebot message automation.
+  $data = array(
+    'channel'     => variable_get('coffeebot_channel', COFFEEBOT_DEFAULT_CHANNEL),
+    'username'    => variable_get('coffeebot_user', COFFEEBOT_DEFAULT_USERNAME),
+    'text'        => $message,
+    'icon_emoji'  => variable_get('coffeebot_icon_emoji', COFFEEBOT_DEFAULT_EMOJI)
+  );
+  $content = json_encode($data);
+  drupal_set_message($content);
+
+  // Initializing Curl.
+  $curl = curl_init(COFFEEBOT_SLACK_URL);
+  curl_setopt($curl, CURLOPT_HEADER, false);
+  curl_setopt($curl, CURLOPT_HTTPHEADER, array("Content-type: application/json"));
+  curl_setopt($curl, CURLOPT_POST, true);
+  curl_setopt($curl, CURLOPT_POSTFIELDS, $content);
+
+  $json_response = curl_exec($curl);
+
+  $status = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+
+  if ( $status != 201 ) {
+    drupal_set_message('Oops, something\'s wrong! Check the log.');
+    watchdog('coffeebot',
+        'Error: call to Slack API failed with status @status, response @json_response',
+        array(
+          '@status' => $status,
+          '@json_response' => $json_response,
+        ),
+        WATCHDOG_ERROR
+    );
+  }
+  else {
+    drupal_set_message('Message sent to slack! Hooray!');
+  }
+
+  curl_close($curl);
+  }
+}
